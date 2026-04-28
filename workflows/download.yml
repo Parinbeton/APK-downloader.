@@ -1,4 +1,4 @@
-name: Download YouTube Video
+name: Download YouTube Video (Android Client - No Cookies)
 
 on:
   workflow_dispatch:
@@ -13,19 +13,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install yt-dlp
-        run: pip install yt-dlp
+      - name: Install yt-dlp and ffmpeg
+        run: |
+          pip install yt-dlp
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Download video
+      - name: Download video using Android client
         run: |
           echo "Downloading: ${{ github.event.inputs.url }}"
-          yt-dlp "${{ github.event.inputs.url }}" -o "video.mp4"
+          yt-dlp \
+            --extractor-args "youtube:player-client=android" \
+            --merge-output-format mp4 \
+            --output "video.mp4" \
+            "${{ github.event.inputs.url }}"
 
-      - name: Upload artifact
+      - name: Upload video as artifact
         uses: actions/upload-artifact@v4
         with:
           name: downloaded-video
           path: video.mp4
+          retention-days: 7
