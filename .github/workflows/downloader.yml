@@ -1,64 +1,50 @@
-name: Web Browser with GUI
-
+name: Download from Commit & Save to Repo
 on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: 'آدرس صفحه وب'
-        required: true
-        default: 'https://www.google.com'
-        type: string
-
+  push:
+    branches:
+      - "**"
 jobs:
-  gui_browsing:
+  save-file:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: چک‌اوت کد (در صورت نیاز)
-        uses: actions/checkout@v3
-
-      - name: نصب Xvfb و Chrome
-        run: |
-          sudo apt update
-          sudo apt install -y xvfb google-chrome-stable
-
-      - name: نصب Node.js و Playwright
-        uses: actions/setup-node@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: '20'
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: نصب Playwright و مرورگرها
+      - name: Install yt-dlp
+        run: sudo apt-get install -y yt-dlp
+
+      - name: Extract URLs and download videos
         run: |
-          npm install -D playwright
-          npx playwright install
+          MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $MSG"
 
-      - name: اجرای Xvfb (رابط گرافیکی مجازی)
+          if echo "$MSG" | grep -qP 'download-youtube:'; then
+            URL_LINE=$(echo "$MSG" | grep -oP 'download-youtube:\s*\K.*')
+          else
+            echo "❌ No download command found in commit message"
+            exit 1
+          fi
+
+          echo "Downloading YouTube videos"
+          mkdir -p downloads
+
+          for URL in $URL_LINE; do
+            FILENAME=$(yt-dlp --get-filename -o "%(title)s.%(ext)s" "$URL")
+            echo "⬇️ Downloading $URL -> $FILENAME"
+
+            yt-dlp -o "downloads/${FILENAME}" "$URL" || exit 1
+          done
+
+      - name: Commit & Push
         run: |
-          Xvfb :99 -screen 0 1920x1080x24 &             # اجرای Xvfb در پس‌زمینه
-          echo "export DISPLAY=:99" >> $GITHUB_ENV     # تنظیم DISPLAY برای اسکریپت بعدی
-
-      - name: اجرای اسکریپت مرورگر
-        env:
-          DISPLAY: :99
-        run: |
-          # نوشتن اسکریپت Node.js برای بازدید از URL و عکسبرداری
-cat <<EOF > ./browse.js
-const { chromium } = require('playwright');
-
-(async () => {
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } } });
-  const page = await context.newPage();
-  await page.goto('${{ github.event.inputs.url }}', { waitUntil: 'networkidle' });
-  await page.screenshot({ path: 'screenshot.png' });
-  await browser.close();
-})();
-EOF
-          # اجرای اسکریپت
-          node ./browse.js
-
-      - name: آپلود اسکرین‌شات
-        uses: actions/upload-artifact@v3
-        with:
-          name: screenshot
-          path: screenshot.png
+          BRANCH="${GITHUB_REF_NAME}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add downloads/
+          git commit -m "Add downloaded videos from commit [skip ci]" || echo "Nothing to commit"
+          echo "🚀 Pushing to branch: $BRANCH"
+          git push origin HEAD:$BRANCH
