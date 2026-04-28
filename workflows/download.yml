@@ -1,39 +1,31 @@
-name: Download YouTube Video (Android Client - No Cookies)
+name: Download YouTube Video
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube video URL'
+        description: 'Enter the YouTube video URL'
         required: true
-        type: string
+      quality:
+        description: 'Enter the desired quality (e.g. 720p, 1080p, best)'
+        required: true
 
 jobs:
-  download:
+  youtube_download:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
-      - name: Install yt-dlp and ffmpeg
-        run: |
-          pip install yt-dlp
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Download video using Android client
-        run: |
-          echo "Downloading: ${{ github.event.inputs.url }}"
-          yt-dlp \
-            --extractor-args "youtube:player-client=android" \
-            --merge-output-format mp4 \
-            --output "video.mp4" \
-            "${{ github.event.inputs.url }}"
-
-      - name: Upload video as artifact
-        uses: actions/upload-artifact@v4
+      - name: Setup Python
+        uses: actions/setup-python@v2
         with:
-          name: downloaded-video
-          path: video.mp4
-          retention-days: 7
+          python-version: '3.x'
+
+      - name: Install yt-dlp
+        run: |
+          pip install -U yt-dlp
+
+      - name: Download Video
+        run: |
+          yt-dlp -f "${{ github.event.inputs.quality }}" "${{ github.event.inputs.url }}"
