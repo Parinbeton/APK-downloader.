@@ -1,44 +1,60 @@
-name: Download YouTube Video
+name: Web Browser with GUI
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'آدرس ویدئوی یوتیوب را وارد کنید'
+        description: 'آدرس صفحه وب'
         required: true
-      quality:
-        description: 'کیفیت مورد نظر را وارد کنید (مثال: 720p, 1080p, best)'
-        required: true
-        default: 'best' # کیفیت پیش‌فرض در صورت عدم ورود
+        default: 'https://www.google.com'
+        type: string
 
 jobs:
-  youtube_download:
+  browse_with_gui:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3 # استفاده از نسخه جدیدتر checkout
+      - name: چک‌اوت پروژه (در صورت 필요)
+        uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4 # استفاده از نسخه جدیدتر setup-python
+      - name: نصب Xvfb و مرورگر (کروم)
+        run: |
+          sudo apt update
+          sudo apt install -y xvfb google-chrome-stable
+
+      - name: نصب Node.js و Playwright
+        uses: actions/setup-node@v3
         with:
-          python-version: '3.9' # یا نسخه پایتون مورد نظر شما
+          node-version: '20'
 
-      - name: Install yt-dlp
+      - name: نصب Playwright و مرورگرها
         run: |
-          python -m pip install -U yt-dlp
-        shell: bash # تعیین صریح shell
+          npm install -D playwright
+          npx playwright install
 
-      - name: Download YouTube Video
+      - name: اجرای Xvfb
         run: |
-          echo "Downloading video from: ${{ github.event.inputs.url }}"
-          echo "Desired quality: ${{ github.event.inputs.quality }}"
-          yt-dlp -f "${{ github.event.inputs.quality }}" "${{ github.event.inputs.url }}"
-        shell: bash # تعیین صریح shell
+          Xvfb :99 -screen 0 1280x720x24 &
+          export DISPLAY=:99
+          
+      - name: اجرای اسکریپت مرورگر
+        run: |
+          echo "
+          const { chromium } = require('playwright');
 
-      # اضافه کردن یک مرحله برای ذخیره فایل دانلود شده (اختیاری)
-      # اگر می‌خواهید فایل دانلود شده را نگه دارید، این بخش را فعال کنید
-      # - name: Upload downloaded video
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: downloaded-video
-      #     path: ./*.mp4 # یا فرمت دیگر فایل دانلود شده
+          (async () => {
+            const browser = await chromium.launch({ headless: false });
+            const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+            const page = await context.newPage();
+            await page.goto('${{ github.event.inputs.url }}', { waitUntil: 'networkidle' });
+            await page.screenshot({ path: 'screenshot.png' });
+            await browser.close();
+          })();
+          " > ./browse.js
+
+          node ./browse.js
+
+      - name: آپلود اسکرین‌شات
+        uses: actions/upload-artifact@v3
+        with:
+          name: screenshot
+          path: screenshot.png
