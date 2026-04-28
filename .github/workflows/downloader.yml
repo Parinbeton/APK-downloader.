@@ -4,28 +4,41 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Enter the YouTube video URL'
+        description: 'آدرس ویدئوی یوتیوب را وارد کنید'
         required: true
       quality:
-        description: 'Enter the desired quality (e.g. 720p, 1080p, best)'
+        description: 'کیفیت مورد نظر را وارد کنید (مثال: 720p, 1080p, best)'
         required: true
+        default: 'best' # کیفیت پیش‌فرض در صورت عدم ورود
 
 jobs:
   youtube_download:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3 # استفاده از نسخه جدیدتر checkout
 
-      - name: Setup Python
-        uses: actions/setup-python@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4 # استفاده از نسخه جدیدتر setup-python
         with:
-          python-version: '3.x'
+          python-version: '3.9' # یا نسخه پایتون مورد نظر شما
 
       - name: Install yt-dlp
         run: |
-          pip install -U yt-dlp
+          python -m pip install -U yt-dlp
+        shell: bash # تعیین صریح shell
 
-      - name: Download Video
+      - name: Download YouTube Video
         run: |
+          echo "Downloading video from: ${{ github.event.inputs.url }}"
+          echo "Desired quality: ${{ github.event.inputs.quality }}"
           yt-dlp -f "${{ github.event.inputs.quality }}" "${{ github.event.inputs.url }}"
+        shell: bash # تعیین صریح shell
+
+      # اضافه کردن یک مرحله برای ذخیره فایل دانلود شده (اختیاری)
+      # اگر می‌خواهید فایل دانلود شده را نگه دارید، این بخش را فعال کنید
+      # - name: Upload downloaded video
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: downloaded-video
+      #     path: ./*.mp4 # یا فرمت دیگر فایل دانلود شده
