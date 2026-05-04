@@ -1,4 +1,4 @@
-name: Build Universal APK
+name: Download Original Split APKs
 
 on:
   workflow_dispatch:
@@ -6,12 +6,21 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
-        default: ''
+        default: 'https://play.google.com/store/apps/details?id=com.orbvpn.android'
+      arch:
+        description: 'معماری گوشی شما'
+        required: true
+        type: choice
+        options:
+          - 'arm64 (گوشی جدید)'
+          - 'armv7 (گوشی قدیمی)'
+          - 'universal (همه گوشی‌ها)'
+        default: 'armv7 (گوشی قدیمی)'
 
 jobs:
-  build-universal:
+  download-splits:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     
     steps:
       - name: Checkout repository
@@ -19,12 +28,21 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract package name
+      - name: Extract details
         id: extract
         run: |
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
           echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+          
+          ARCH_INPUT="${{ github.event.inputs.arch }}"
+          if [[ "$ARCH_INPUT" == *"armv7"* ]]; then
+            echo "arch=gplay-armv7" >> $GITHUB_OUTPUT
+          elif [[ "$ARCH_INPUT" == *"arm64"* ]]; then
+            echo "arch=gplay-arm64" >> $GITHUB_OUTPUT
+          else
+            echo "arch=universal" >> $GITHUB_OUTPUT
+          fi
 
       - name: Checkout gplay downloader
         uses: actions/checkout@v4
@@ -37,14 +55,13 @@ jobs:
         with:
           path: |
             gplay/.venv
-            gplay/APKEditor.jar
             ~/.gplay-auth.json
-          key: gplay-${{ runner.os }}-v7
+          key: gplay-splits-${{ runner.os }}-v1
 
-      - name: Setup environment
+      - name: Setup
         run: |
           cd gplay
-          sudo apt-get update -qq && sudo apt-get install -y -qq apksigner openjdk-17-jre-headless
+          sudo apt-get update -qq && sudo apt-get install -y -qq apksigner openjdk-17-jre-headless zip
           if [ ! -d ".venv" ]; then
             chmod +x setup.sh && sudo ./setup.sh
           fi
@@ -52,52 +69,55 @@ jobs:
             ./gplay auth
           fi
 
-      - name: Download and Build Universal APK
+      - name: Download Split APKs
         run: |
-          # ایجاد مسیرهای کاری
-          mkdir -p apks downloads/arm64 downloads/armv7 merged
+          mkdir -p apks
           
           cd gplay
+          ARCH_TYPE="${{ steps.extract.outputs.arch }}"
+          PACKAGE="${{ steps.extract.outputs.package }}"
           
-          # دانلود هر دو معماری
-          echo "Downloading ARM64..."
-          ./gplay download "${{ steps.extract.outputs.package }}" -a arm64 -o ../downloads/arm64 || true
-          
-          echo "Downloading ARMv7..."
-          ./gplay download "${{ steps.extract.outputs.package }}" -a armv7 -o ../downloads/armv7 || true
-          
-          cd ..
-          
-          # جمع‌آوری همه splitهای منحصربه‌فرد
-          echo "Collecting splits..."
-          cp downloads/arm64/*.apk merged/ 2>/dev/null || true
-          cp downloads/armv7/*.apk merged/ 2>/dev/null || true
-          
-          # حذف duplicateها
-          rm -f merged/*config.armeabi-v7a* merged/*config.arm64-v8a*
-          cp downloads/arm64/*config.arm64* merged/ 2>/dev/null || true
-          cp downloads/armv7/*config.armeabi* merged/ 2>/dev/null || true
-          
-          echo "Files to merge:"
-          ls -la merged/
-          
-          # ادغام
-          echo "Merging..."
-          java -jar gplay/APKEditor.jar m -i merged/ -o apks/universal.apk
-          
-          if [ -f apks/universal.apk ]; then
-            mv apks/universal.apk "apks/${{ steps.extract.outputs.package }}-UNIVERSAL.apk"
-            echo "✅ Success: apks/${{ steps.extract.outputs.package }}-UNIVERSAL.apk"
-            ls -lh apks/
+          if [ "$ARCH_TYPE" = "universal" ]; then
+            # دانلود هر دو معماری
+            echo "Downloading ARM64..."
+            ./gplay download "$PACKAGE" -a arm64 -o ../temp_arm64 || true
+            
+            echo "Downloading ARMv7..."
+            ./gplay download "$PACKAGE" -a armv7 -o ../temp_armv7 || true
+            
+            cd ..
+            
+            # ترکیب هر دو در یک پوشه
+            mkdir -p temp_all
+            cp temp_arm64/* temp_all/ 2>/dev/null || true
+            cp temp_armv7/* temp_all/ 2>/dev/null || true
+            
+            # ZIP کردن برای نصب با SAI
+            zip -r "apks/${PACKAGE}-UNIVERSAL-SPLITS.zip" temp_all/
+            echo "✅ Created universal split package"
+            
           else
-            echo "⚠️ Merge failed, creating ZIP..."
-            zip -r "apks/${{ steps.extract.outputs.package }}-splits.zip" merged/
+            # دانلود یک معماری
+            ARCH_GPLAY=$(echo "$ARCH_TYPE" | sed 's/gplay-//')
+            echo "Downloading for $ARCH_GPLAY..."
+            ./gplay download "$PACKAGE" -a $ARCH_GPLAY -o ../temp_single
+            
+            cd ..
+            
+            # ZIP کردن
+            zip -r "apks/${PACKAGE}-${ARCH_GPLAY}-SPLITS.zip" temp_single/
+            echo "✅ Created $ARCH_GPLAY split package"
           fi
+          
+          # نمایش خروجی
+          echo ""
+          echo "Final output:"
+          ls -lh apks/
 
       - name: Commit and Push
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add apks/
-          git commit -m "🌍 Universal APK: ${{ steps.extract.outputs.package }}" || echo "Nothing to commit"
+          git commit -m "📱 Split APKs: ${{ steps.extract.outputs.package }}" || echo "No changes"
           git push
