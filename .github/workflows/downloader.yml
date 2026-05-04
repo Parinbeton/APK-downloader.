@@ -1,4 +1,4 @@
-name: Download Original APK
+name: Download Original APK Files
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
-        default: 'https://play.google.com/store/apps/details?id=com.spotify.music'
+        default: ''
 
 jobs:
   download:
@@ -14,60 +14,72 @@ jobs:
     timeout-minutes: 15
     
     steps:
-      - name: Checkout repository
+      - name: Checkout this repository
         uses: actions/checkout@v4
+        with:
+          path: my-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download APK from APKPure
+      - name: Extract Package Name
+        id: extract
         run: |
-          # فقط wget و jq نیاز است (از قبل نصب هستند)
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
-          
-          echo "📱 Package: $PACKAGE"
-          
-          # ساخت پوشه
-          mkdir -p apks
-          
-          # روش ۱: APKPure (قابل اعتماد و همیشه در دسترس)
-          echo "🔄 Trying APKPure..."
-          
-          # دریافت اطلاعات نسخه
-          API_INFO="https://apkpure.com/api/package/info?package=$PACKAGE"
-          VERSION=$(curl -s "$API_INFO" | jq -r '.data.version_code // empty')
-          
-          if [ -n "$VERSION" ]; then
-            echo "Found version: $VERSION"
-            
-            # ساخت لینک دانلود APKPure
-            DOWNLOAD_URL="https://d.apkpure.com/b/APK/${PACKAGE}?versionCode=${VERSION}"
-            
-            echo "Downloading..."
-            wget -q --show-progress \
-              -O "apks/${PACKAGE}-${VERSION}.apk" \
-              "$DOWNLOAD_URL"
-            
-            # بررسی سلامت فایل
-            if [ -f "apks/${PACKAGE}-${VERSION}.apk" ]; then
-              SIZE=$(stat -c%s "apks/${PACKAGE}-${VERSION}.apk")
-              echo "✅ Downloaded: ${SIZE} bytes ($(echo "scale=1; $SIZE/1024/1024" | bc)MB)"
-            fi
-          else
-            # روش ۲: APKCombo به عنوان fallback
-            echo "⚠️  APKPure failed, trying APKCombo..."
-            curl -s "https://apkcombo.com/checkin" \
-              --data "id=$PACKAGE" \
-              | jq -r '.url' | xargs wget -q -O "apks/${PACKAGE}.apk"
-          fi
-          
-      - name: Show Results
+          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+          echo "Target: $PACKAGE"
+
+      - name: Checkout gplay downloader
+        uses: actions/checkout@v4
+        with:
+          repository: alltechdev/gplay-apk-downloader
+          path: gplay
+
+      - name: Cache gplay dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            gplay/.venv
+            gplay/APKEditor.jar
+            ~/.gplay-auth.json
+          key: gplay-${{ runner.os }}-v2
+
+      - name: Setup
         run: |
-          echo "📦 Downloaded files:"
-          ls -lh apks/ 2>/dev/null || echo "❌ No files downloaded"
+          cd gplay
+          sudo apt-get update -qq && sudo apt-get install -y -qq apksigner openjdk-17-jre-headless
+          if [ ! -d ".venv" ]; then
+            chmod +x setup.sh && sudo ./setup.sh
+          fi
+
+      - name: Authenticate
+        run: |
+          cd gplay
+          if [ ! -f ~/.gplay-auth.json ]; then
+            ./gplay auth
+          fi
+
+      - name: Download APKs (NO MERGE)
+        run: |
+          cd gplay
+          mkdir -p ../my-repo/apks
           
+          echo "Downloading without merge (original files)..."
+          # حذف پرچم -m یعنی بدون ادغام
+          ./gplay download "${{ steps.extract.outputs.package }}" -a arm64 -o ../my-repo/apks
+          
+          echo "----------------------------------------"
+          echo "Files downloaded:"
+          ls -lah ../my-repo/apks/
+          
+          # اگر فقط یک APK هست، همون فایل نصبی اصلیه
+          APK_COUNT=$(ls ../my-repo/apks/*.apk 2>/dev/null | wc -l)
+          echo "Total APK files: $APK_COUNT"
+
       - name: Commit and Push
         run: |
+          cd my-repo
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add apks/
-          git commit -m "📱 Add APK: ${{ steps.extract.outputs.package }}" || echo "No changes to commit"
+          git commit -m "📱 Original APK: ${{ steps.extract.outputs.package }}" || echo "No changes"
           git push
