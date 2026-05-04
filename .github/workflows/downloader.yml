@@ -1,4 +1,4 @@
-name: Fast APK Downloader & Commit
+name: Download Original APK from Google Play
 
 on:
   workflow_dispatch:
@@ -9,83 +9,94 @@ on:
         default: ''
 
 jobs:
-  download-and-commit:
+  download:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     
     steps:
-      - name: Checkout this repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: my-repo
 
-      - name: Extract Package Name
-        id: extract
+      - name: Download Original APK
         run: |
+          # نصب پیش‌نیازهای حداقلی
+          sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip jq wget
+          pip3 install -q requests
+          
+          # استخراج نام پکیج
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
-          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
-          echo "Target: $PACKAGE"
-
-      - name: Checkout gplay-downloader
-        uses: actions/checkout@v4
-        with:
-          repository: alltechdev/gplay-apk-downloader
-          path: gplay
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            gplay/.venv
-            gplay/APKEditor.jar
-            ~/.android
-            ~/.gplay-auth.json
-          key: gplay-${{ runner.os }}-${{ hashFiles('gplay/setup.sh') }}
-
-      - name: Setup gplay
+          
+          echo "📱 Package: $PACKAGE"
+          echo "🔄 Getting download info..."
+          
+          # اسکریپت پایتون برای دریافت لینک مستقیم از Aurora Store
+          cat > /tmp/download.py << 'PYEOF'
+          import requests
+          import json
+          import sys
+          import os
+          
+          package = os.environ['PACKAGE']
+          
+          # دریافت توکن
+          auth_resp = requests.post('https://auroraoss.in/api/auth', 
+            json={"email": "anonymous", "token": "anonymous"})
+          token = auth_resp.json()['auth']
+          
+          # دریافت اطلاعات اپلیکیشن
+          headers = {'Authorization': f'Bearer {token}'}
+          info = requests.get(f'https://auroraoss.in/api/details/{package}', 
+            headers=headers).json()
+          
+          version_code = info['code']
+          files = info.get('downloads', [])
+          
+          print(f"Version: {info['version']} (code: {version_code})")
+          print(f"Files: {len(files)}")
+          
+          # دانلود همه فایل‌ها
+          os.makedirs('apks', exist_ok=True)
+          
+          for idx, file_info in enumerate(files):
+              file_name = file_info['name']
+              file_type = file_info.get('type', 'unknown')
+              file_size = file_info.get('size', 0)
+              
+              print(f"Downloading [{idx+1}/{len(files)}]: {file_name} ({file_size/1024/1024:.1f}MB)")
+              
+              dl_resp = requests.get(
+                  f'https://auroraoss.in/api/download/{package}/{version_code}/{idx}',
+                  headers=headers,
+                  stream=True
+              )
+              
+              # ذخیره فایل با نام اصلی
+              output_path = os.path.join('apks', file_name)
+              with open(output_path, 'wb') as f:
+                  for chunk in dl_resp.iter_content(chunk_size=8192):
+                      f.write(chunk)
+              
+              print(f"  ✓ Saved: {file_name}")
+          
+          # نمایش خلاصه
+          total_size = sum(f['size'] for f in files)
+          print(f"\n✅ Total: {len(files)} files, {total_size/1024/1024:.1f}MB")
+          PYEOF
+          
+          # اجرای اسکریپت دانلود
+          export PACKAGE="$PACKAGE"
+          python3 /tmp/download.py
+          
+      - name: Show Results
         run: |
-          cd gplay
-          sudo apt-get update -qq && sudo apt-get install -y -qq apksigner openjdk-17-jre-headless
-          if [ ! -d ".venv" ]; then
-            chmod +x setup.sh && sudo ./setup.sh
-          fi
-
-      - name: Auth and Download
-        id: download
+          echo "📦 Downloaded files:"
+          ls -lh apks/ 2>/dev/null || echo "No apks folder"
+          
+      - name: Commit and Push
         run: |
-          cd gplay
-          # احراز هویت فقط اگر فایل توکن موجود نباشد
-          if [ ! -f ~/.gplay-auth.json ]; then
-            ./gplay auth
-          fi
-          
-          # ایجاد پوشه خروجی در ریپازیتوری اصلی
-          mkdir -p ../my-repo/apks
-          
-          # دانلود APK
-          ./gplay download "${{ steps.extract.outputs.package }}" -a arm64 -m -o ../my-repo/apks
-          
-          # نمایش فایل دانلود شده
-          echo "Files in apks folder:"
-          ls -la ../my-repo/apks/
-          
-          # ثبت مسیر فایل برای مرحله بعد
-          APK_FILE=$(ls ../my-repo/apks/*.apk 2>/dev/null | head -1)
-          if [ -n "$APK_FILE" ]; then
-            echo "apk_found=true" >> $GITHUB_OUTPUT
-            echo "Downloaded: $APK_FILE"
-          else
-            echo "apk_found=false" >> $GITHUB_OUTPUT
-            echo "WARNING: No APK found!"
-          fi
-
-      - name: Commit and Push APK
-        if: steps.download.outputs.apk_found == 'true'
-        run: |
-          cd my-repo
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add apks/
-          git commit -m "📱 Add ${{ steps.extract.outputs.package }} APK" || echo "No changes"
+          git commit -m "📱 Original APK: ${{ steps.extract.outputs.package }}" || echo "No changes"
           git push
