@@ -1,4 +1,4 @@
-name: Download Original APK Files
+name: Download APK for ARMv7/Arm64
 
 on:
   workflow_dispatch:
@@ -7,6 +7,14 @@ on:
         description: 'لینک گوگل پلی برنامه'
         required: true
         default: ''
+      arch:
+        description: 'معماری پردازنده گوشی'
+        required: true
+        type: choice
+        options:
+          - arm64 (گوشی‌های جدید)
+          - armv7 (گوشی‌های قدیمی)
+        default: 'arm64 (گوشی‌های جدید)'
 
 jobs:
   download:
@@ -20,13 +28,21 @@ jobs:
           path: my-repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Package Name
+      - name: Extract details
         id: extract
         run: |
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
+          # تبدیل انتخاب کاربر به فرمت قابل استفاده
+          ARCH_INPUT="${{ github.event.inputs.arch }}"
+          if [[ "$ARCH_INPUT" == *"arm64"* ]]; then
+            ARCH="arm64"
+          else
+            ARCH="armv7"
+          fi
           echo "package=$PACKAGE" >> $GITHUB_OUTPUT
-          echo "Target: $PACKAGE"
+          echo "arch=$ARCH" >> $GITHUB_OUTPUT
+          echo "Target: $PACKAGE for $ARCH"
 
       - name: Checkout gplay downloader
         uses: actions/checkout@v4
@@ -41,7 +57,7 @@ jobs:
             gplay/.venv
             gplay/APKEditor.jar
             ~/.gplay-auth.json
-          key: gplay-${{ runner.os }}-v2
+          key: gplay-${{ runner.os }}-v3
 
       - name: Setup
         run: |
@@ -58,22 +74,18 @@ jobs:
             ./gplay auth
           fi
 
-      - name: Download APKs (NO MERGE)
+      - name: Download Correct Architecture
         run: |
           cd gplay
           mkdir -p ../my-repo/apks
           
-          echo "Downloading without merge (original files)..."
-          # حذف پرچم -m یعنی بدون ادغام
-          ./gplay download "${{ steps.extract.outputs.package }}" -a arm64 -o ../my-repo/apks
+          echo "Downloading for ${{ steps.extract.outputs.arch }}..."
+          ./gplay download "${{ steps.extract.outputs.package }}" \
+            -a ${{ steps.extract.outputs.arch }} \
+            -o ../my-repo/apks
           
-          echo "----------------------------------------"
-          echo "Files downloaded:"
+          echo "Files:"
           ls -lah ../my-repo/apks/
-          
-          # اگر فقط یک APK هست، همون فایل نصبی اصلیه
-          APK_COUNT=$(ls ../my-repo/apks/*.apk 2>/dev/null | wc -l)
-          echo "Total APK files: $APK_COUNT"
 
       - name: Commit and Push
         run: |
@@ -81,5 +93,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add apks/
-          git commit -m "📱 Original APK: ${{ steps.extract.outputs.package }}" || echo "No changes"
+          git commit -m "📱 ${{ steps.extract.outputs.package }} (ARMv7)" || echo "No changes"
           git push
