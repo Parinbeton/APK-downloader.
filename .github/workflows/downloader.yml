@@ -1,4 +1,4 @@
-name: Download APK from Google Play Link
+name: Fast APK Downloader & Commit
 
 on:
   workflow_dispatch:
@@ -6,46 +6,133 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
-        default: 'https://play.google.com/store/apps/details?id=com.spotify.music'
+        default: ''
 
 jobs:
-  download-apk:
+  download-and-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
     steps:
-      - name: Extract Package Name from URL
+      # 1. دریافت کد ریپازیتوری خودمان (برای Commit کردن بعدا)
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: my-repo
+          # توکن پیش‌فرض برای push کافی است، مگر اینکه ریپازیتوری خصوصی باشد
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      # 2. استخراج نام پکیج از لینک
+      - name: Extract Package Name
         id: extract
         run: |
           URL="${{ github.event.inputs.app_url }}"
-          PACKAGE_NAME=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
-          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
-          echo "Package Name: $PACKAGE_NAME"
+          PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
+          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+          echo "Target Package: $PACKAGE"
 
-      - name: Checkout the downloader repository
-        uses: actions/checkout@v4
+      # 3. کش کردن Python و Java برای اجراهای بعدی (باعث افزایش سرعت)
+      - name: Cache Python & Java
+        uses: actions/cache@v4
         with:
-          repository: alltechdev/gplay-apk-downloader
-          path: gplay-downloader
+          path: |
+            ~/.cache/pip
+            /usr/lib/jvm/java-17-openjdk-amd64
+          key: deps-${{ runner.os }}-${{ hashFiles('.github/workflows/download-apk.yml') }}
 
-      - name: Install prerequisites and setup project
+      # 4. نصب فقط وابستگی‌های حیاتی (نه کل پروژه)
+      - name: Install Lightweight Dependencies
         run: |
-          # نصب apksigner که پیش‌نیاز ضروری است
-          sudo apt-get update -qq && sudo apt-get install -y apksigner
-          # حالا اسکریپت نصب اصلی پروژه را اجرا می‌کنیم
-          cd gplay-downloader
-          chmod +x setup.sh && sudo ./setup.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openjdk-17-jre-headless apksigner python3 python3-pip curl unzip
+          pip3 install --quiet requests protobuf
+          
+          # دانلود APKEditor.jar فقط اگر وجود نداشته باشد
+          if [ ! -f "APKEditor.jar" ]; then
+            wget -q https://github.com/REAndroid/APKEditor/releases/download/V1.5.0/APKEditor-1.5.0.jar -O APKEditor.jar
+          fi
 
-      - name: Authenticate with Google Play
+      # 5. احراز هویت و دانلود مستقیم (اسکریپت اختصاصی ما)
+      - name: Auth & Download APK
+        id: download
         run: |
-          cd gplay-downloader
-          ./gplay auth
+          python3 << 'PYEOF'
+          import subprocess, os, json, hashlib, sys
 
-      - name: Download the APK
+          PACKAGE = "${{ steps.extract.outputs.package }}"
+          OUTPUT_DIR = "my-repo/apks"
+          os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+          # تابع اجرای دستورات
+          def run(cmd):
+              result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+              if result.returncode != 0:
+                  print(f"Command Failed: {cmd}\n{result.stderr}")
+                  sys.exit(1)
+              return result.stdout.strip()
+
+          # احراز هویت ناشناس گوگل پلی (با استفاده از روش پروژه اصلی)
+          print("Authenticating...")
+          auth_script = """
+          import urllib.request, json, base64
+          url = "https://auroraoss.in/api/auth"
+          data = json.dumps({"email": "anonymous", "token": "anonymous", "device": "gplay-apk-downloader"}).encode()
+          req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+          resp = urllib.request.urlopen(req, timeout=30)
+          result = json.loads(resp.read())
+          print(result.get("auth", ""))
+          """
+          with open("auth_temp.py", "w") as f:
+              f.write(auth_script)
+          AUTH_TOKEN = run("python3 auth_temp.py")
+          print(f"Auth Token: {AUTH_TOKEN[:10]}...")
+
+          # دریافت اطلاعات نسخه و لینک دانلود
+          print(f"Fetching details for {PACKAGE}...")
+          details_url = f"https://api.auroraoss.in/details/{PACKAGE}"
+          req = urllib.request.Request(details_url, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
+          resp = urllib.request.urlopen(req, timeout=30)
+          details = json.loads(resp.read())
+          
+          version_code = details.get("code")
+          version_name = details.get("version")
+          print(f"Found: {version_name} (code: {version_code})")
+
+          # دریافت لینک دانلود
+          dl_url = f"https://api.auroraoss.in/download/{PACKAGE}/{version_code}"
+          req = urllib.request.Request(dl_url, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
+          resp = urllib.request.urlopen(req, timeout=30)
+          dl_data = json.loads(resp.read())
+          apk_url = dl_data.get("url")
+          if not apk_url:
+              print("No download URL found!")
+              print(dl_data)
+              sys.exit(1)
+
+          # دانلود فایل
+          print(f"Downloading APK...")
+          apk_filename = f"{PACKAGE}-{version_code}.apk"
+          apk_path = os.path.join(OUTPUT_DIR, apk_filename)
+          run(f"wget -q -O '{apk_path}' '{apk_url}'")
+          
+          file_size = os.path.getsize(apk_path)
+          print(f"Downloaded: {apk_filename} ({file_size / 1024 / 1024:.2f} MB)")
+          print(f"APK_PATH={apk_path}")
+          PYEOF
+
+      # 6. Commit و Push فایل به ریپازیتوری
+      - name: Commit & Push APK to Repository
         run: |
-          cd gplay-downloader
-          ./gplay download "${{ steps.extract.outputs.package_name }}" -a arm64 -m -o ./output
-
-      - name: Upload APK as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: downloaded-apk
-          path: gplay-downloader/output/*.apk
+          cd my-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # اگر فایل جدیدی هست، commit کن
+          git add apks/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "📦 Add APK for ${{ steps.extract.outputs.package }}"
+            git push
+            echo "APK pushed to repository successfully!"
+          fi
