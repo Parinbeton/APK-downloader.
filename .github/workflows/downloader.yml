@@ -1,4 +1,4 @@
-name: Download Original APK from Google Play
+name: Simple APK Downloader
 
 on:
   workflow_dispatch:
@@ -6,97 +6,38 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
-        default: ''
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Original APK
+      - name: Download
         run: |
-          # نصب پیش‌نیازهای حداقلی
-          sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip jq wget
-          pip3 install -q requests
-          
-          # استخراج نام پکیج
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
           
-          echo "📱 Package: $PACKAGE"
-          echo "🔄 Getting download info..."
+          mkdir -p apks
           
-          # اسکریپت پایتون برای دریافت لینک مستقیم از Aurora Store
-          cat > /tmp/download.py << 'PYEOF'
-          import requests
-          import json
-          import sys
-          import os
+          # مستقیم از APKCombo
+          wget -q "https://apkcombo.com/checkin" --post-data="id=$PACKAGE" -O /tmp/info.json
+          DL_URL=$(jq -r '.url' /tmp/info.json)
           
-          package = os.environ['PACKAGE']
-          
-          # دریافت توکن
-          auth_resp = requests.post('https://auroraoss.in/api/auth', 
-            json={"email": "anonymous", "token": "anonymous"})
-          token = auth_resp.json()['auth']
-          
-          # دریافت اطلاعات اپلیکیشن
-          headers = {'Authorization': f'Bearer {token}'}
-          info = requests.get(f'https://auroraoss.in/api/details/{package}', 
-            headers=headers).json()
-          
-          version_code = info['code']
-          files = info.get('downloads', [])
-          
-          print(f"Version: {info['version']} (code: {version_code})")
-          print(f"Files: {len(files)}")
-          
-          # دانلود همه فایل‌ها
-          os.makedirs('apks', exist_ok=True)
-          
-          for idx, file_info in enumerate(files):
-              file_name = file_info['name']
-              file_type = file_info.get('type', 'unknown')
-              file_size = file_info.get('size', 0)
-              
-              print(f"Downloading [{idx+1}/{len(files)}]: {file_name} ({file_size/1024/1024:.1f}MB)")
-              
-              dl_resp = requests.get(
-                  f'https://auroraoss.in/api/download/{package}/{version_code}/{idx}',
-                  headers=headers,
-                  stream=True
-              )
-              
-              # ذخیره فایل با نام اصلی
-              output_path = os.path.join('apks', file_name)
-              with open(output_path, 'wb') as f:
-                  for chunk in dl_resp.iter_content(chunk_size=8192):
-                      f.write(chunk)
-              
-              print(f"  ✓ Saved: {file_name}")
-          
-          # نمایش خلاصه
-          total_size = sum(f['size'] for f in files)
-          print(f"\n✅ Total: {len(files)} files, {total_size/1024/1024:.1f}MB")
-          PYEOF
-          
-          # اجرای اسکریپت دانلود
-          export PACKAGE="$PACKAGE"
-          python3 /tmp/download.py
-          
-      - name: Show Results
+          if [ "$DL_URL" != "null" ] && [ -n "$DL_URL" ]; then
+            wget -O "apks/$PACKAGE.apk" "$DL_URL"
+            echo "✅ Downloaded successfully"
+          else
+            echo "❌ Failed to get download URL"
+            cat /tmp/info.json
+          fi
+
+      - name: Push
         run: |
-          echo "📦 Downloaded files:"
-          ls -lh apks/ 2>/dev/null || echo "No apks folder"
-          
-      - name: Commit and Push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "bot"
+          git config user.email "bot@github.com"
           git add apks/
-          git commit -m "📱 Original APK: ${{ steps.extract.outputs.package }}" || echo "No changes"
+          git commit -m "Add APK" || true
           git push
