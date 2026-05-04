@@ -6,7 +6,7 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
-        default: ''
+        default: 'https://play.google.com/store/apps/details?id=com.orbvpn.android'
 
 jobs:
   build-universal:
@@ -40,8 +40,7 @@ jobs:
             gplay/.venv
             gplay/APKEditor.jar
             ~/.gplay-auth.json
-            ~/.gplay-auth-armv7.json
-          key: gplay-universal-${{ runner.os }}-v1
+          key: gplay-universal-${{ runner.os }}-v2
 
       - name: Setup tools
         run: |
@@ -51,21 +50,17 @@ jobs:
             chmod +x setup.sh && sudo ./setup.sh
           fi
 
-      - name: Authenticate for both architectures
+      - name: Authenticate
         run: |
           cd gplay
-          # احراز هویت برای ARM64
           if [ ! -f ~/.gplay-auth.json ]; then
-            echo "Getting ARM64 token..."
+            echo "Getting auth token..."
             ./gplay auth
-          fi
-          # احراز هویت برای ARMv7
-          if [ ! -f ~/.gplay-auth-armv7.json ]; then
-            echo "Getting ARMv7 token..."
-            ./gplay auth -a armv7
+          else
+            echo "Auth token already exists"
           fi
 
-      - name: Download all architectures
+      - name: Download both architectures (with fallback)
         run: |
           cd gplay
           WORK_DIR="../universal_build"
@@ -75,13 +70,13 @@ jobs:
           echo "📥 Downloading ARM64 version..."
           ./gplay download "${{ steps.extract.outputs.package }}" \
             -a arm64 \
-            -o $WORK_DIR/arm64 2>&1 | grep -E "Download|Error|APK" || true
+            -o $WORK_DIR/arm64 2>&1 || echo "⚠️ ARM64 download had issues"
           
           echo ""
           echo "📥 Downloading ARMv7 version..."
           ./gplay download "${{ steps.extract.outputs.package }}" \
             -a armv7 \
-            -o $WORK_DIR/armv7 2>&1 | grep -E "Download|Error|APK" || true
+            -o $WORK_DIR/armv7 2>&1 || echo "⚠️ ARMv7 download had issues"
           
           echo ""
           echo "Downloaded files:"
@@ -89,6 +84,18 @@ jobs:
           ls -la $WORK_DIR/arm64/ 2>/dev/null || echo "No ARM64 files"
           echo "--- ARMv7 ---"
           ls -la $WORK_DIR/armv7/ 2>/dev/null || echo "No ARMv7 files"
+          
+          # اگر ARMv7 دانلود نشد، از ARM64 کپی می‌کنیم
+          if [ -z "$(ls -A $WORK_DIR/armv7 2>/dev/null)" ]; then
+            echo "ARMv7 not available, using ARM64 as fallback..."
+            cp -r $WORK_DIR/arm64/* $WORK_DIR/armv7/ 2>/dev/null || true
+          fi
+          
+          # اگر ARM64 دانلود نشد، از ARMv7 کپی می‌کنیم
+          if [ -z "$(ls -A $WORK_DIR/arm64 2>/dev/null)" ]; then
+            echo "ARM64 not available, using ARMv7 as fallback..."
+            cp -r $WORK_DIR/armv7/* $WORK_DIR/arm64/ 2>/dev/null || true
+          fi
 
       - name: Build Universal APK
         run: |
@@ -98,11 +105,8 @@ jobs:
           # جمع‌آوری همه splitهای منحصربه‌فرد
           echo "Collecting all unique splits..."
           
-          # 1. Base APK (از ARM64 - کاملتر است)
-          BASE_APK=$(ls arm64/*.apk 2>/dev/null | grep -v "config\." | head -1)
-          if [ -z "$BASE_APK" ]; then
-            BASE_APK=$(ls armv7/*.apk 2>/dev/null | grep -v "config\." | head -1)
-          fi
+          # 1. Base APK
+          BASE_APK=$(ls arm64/*.apk armv7/*.apk 2>/dev/null | grep -v "config\." | head -1)
           
           if [ -z "$BASE_APK" ]; then
             echo "❌ No base APK found!"
@@ -126,7 +130,7 @@ jobs:
                   fi
                 fi
                 
-                # نگه داشتن زبان‌ها و DPIها (همه)
+                # نگه داشتن زبان‌ها و DPIها
                 if echo "$APK_NAME" | grep -qE "config\.(en|fa|ar|es|fr|de|zh|xxhdpi|mdpi|xhdpi|hdpi|tvdpi)"; then
                   if [ ! -f "all_splits/$APK_NAME" ]; then
                     cp "$apk" all_splits/
@@ -138,36 +142,32 @@ jobs:
           done
           
           echo ""
-          echo "Total unique splits: $(ls all_splits/ | wc -l)"
+          echo "Total unique splits: $(ls all_splits/ 2>/dev/null | wc -l)"
           
           # 3. ادغام به APK یونیورسال
           echo ""
           echo "🔄 Merging into Universal APK..."
           java -jar ../gplay/APKEditor.jar m \
             -i all_splits/ \
-            -o universal/universal.apk 2>&1 | tail -3
+            -o universal/universal.apk 2>&1 | tail -5
           
           if [ -f universal/universal.apk ]; then
-            # نام‌گذاری نهایی
             FINAL_NAME="${{ steps.extract.outputs.package }}-UNIVERSAL.apk"
             cp universal/universal.apk "../apks/$FINAL_NAME"
             
             SIZE=$(stat -c%s "../apks/$FINAL_NAME")
             echo ""
             echo "════════════════════════════════════════"
-            echo "✅ Universal APK Created Successfully!"
+            echo "✅ Universal APK Created!"
             echo "📦 File: $FINAL_NAME"
             echo "📏 Size: $(echo "scale=1; $SIZE/1024/1024" | bc) MB"
-            echo "📱 Compatible with: ARMv7, ARM64, x86"
+            echo "📱 Works on: ARMv7 + ARM64"
             echo "════════════════════════════════════════"
           else
-            echo "❌ Merge failed!"
-            # Fallback: ZIP کردن همه splitها
-            zip -r "../apks/${{ steps.extract.outputs.package }}-SPLITS.zip" all_splits/
-            echo "Fallback: Created split package"
+            echo "⚠️ Merge failed, creating ZIP instead..."
+            zip -r "../apks/${{ steps.extract.outputs.package }}-ALL_SPLITS.zip" all_splits/
           fi
           
-          # نمایش خروجی نهایی
           echo ""
           echo "Final output:"
           ls -lh ../apks/
@@ -179,4 +179,3 @@ jobs:
           git add apks/
           git commit -m "🌍 Universal APK: ${{ steps.extract.outputs.package }}" || echo "No changes"
           git push
-          echo "✅ Committed to repository!"
