@@ -43,7 +43,6 @@ jobs:
       # 4. نصب فقط وابستگی‌های حیاتی (نه کل پروژه)
       - name: Install Lightweight Dependencies
         run: |
-          sudo apt-get update -qq
           sudo apt-get install -y -qq openjdk-17-jre-headless apksigner python3 python3-pip curl unzip
           pip3 install --quiet requests protobuf
           
