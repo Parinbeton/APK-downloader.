@@ -1,25 +1,36 @@
-name: Download APK using gplay-apk-downloader
+name: Download APK from Google Play Link
 
 on:
   workflow_dispatch:
     inputs:
-      package_name:
-        description: 'نام پکیج برنامه (مثلاً com.spotify.music)'
+      app_url:
+        description: 'لینک گوگل پلی برنامه'
         required: true
-        default: 'com.spotify.music'
+        default: 'https://play.google.com/store/apps/details?id=com.spotify.music'
 
 jobs:
   download-apk:
     runs-on: ubuntu-latest
     steps:
+      - name: Extract Package Name from URL
+        id: extract
+        run: |
+          URL="${{ github.event.inputs.app_url }}"
+          PACKAGE_NAME=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+          echo "Package Name: $PACKAGE_NAME"
+
       - name: Checkout the downloader repository
         uses: actions/checkout@v4
         with:
           repository: alltechdev/gplay-apk-downloader
           path: gplay-downloader
 
-      - name: Install dependencies
+      - name: Install prerequisites and setup project
         run: |
+          # نصب apksigner که پیش‌نیاز ضروری است
+          sudo apt-get update -qq && sudo apt-get install -y apksigner
+          # حالا اسکریپت نصب اصلی پروژه را اجرا می‌کنیم
           cd gplay-downloader
           chmod +x setup.sh && sudo ./setup.sh
 
@@ -31,8 +42,7 @@ jobs:
       - name: Download the APK
         run: |
           cd gplay-downloader
-          # دانلود برای معماری arm64-v8a و ادغام split APK ها
-          ./gplay download "${{ github.event.inputs.package_name }}" -a arm64 -m -o ./output
+          ./gplay download "${{ steps.extract.outputs.package_name }}" -a arm64 -m -o ./output
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
