@@ -1,50 +1,41 @@
-name: Download from Commit & Save to Repo
+name: Download APK using gplay-apk-downloader
+
 on:
-  push:
-    branches:
-      - "**"
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'نام پکیج برنامه (مثلاً com.spotify.music)'
+        required: true
+        default: 'com.spotify.music'
+
 jobs:
-  save-file:
+  download-apk:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout
+      - name: Checkout the downloader repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: alltechdev/gplay-apk-downloader
+          path: gplay-downloader
 
-      - name: Install yt-dlp
-        run: sudo apt-get install -y yt-dlp
-
-      - name: Extract URLs and download videos
+      - name: Install dependencies
         run: |
-          MSG=$(git log -1 --pretty=%B)
-          echo "Commit message: $MSG"
+          cd gplay-downloader
+          chmod +x setup.sh && sudo ./setup.sh
 
-          if echo "$MSG" | grep -qP 'download-youtube:'; then
-            URL_LINE=$(echo "$MSG" | grep -oP 'download-youtube:\s*\K.*')
-          else
-            echo "❌ No download command found in commit message"
-            exit 1
-          fi
-
-          echo "Downloading YouTube videos"
-          mkdir -p downloads
-
-          for URL in $URL_LINE; do
-            FILENAME=$(yt-dlp --get-filename -o "%(title)s.%(ext)s" "$URL")
-            echo "⬇️ Downloading $URL -> $FILENAME"
-
-            yt-dlp -o "downloads/${FILENAME}" "$URL" || exit 1
-          done
-
-      - name: Commit & Push
+      - name: Authenticate with Google Play
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add downloads/
-          git commit -m "Add downloaded videos from commit [skip ci]" || echo "Nothing to commit"
-          echo "🚀 Pushing to branch: $BRANCH"
-          git push origin HEAD:$BRANCH
+          cd gplay-downloader
+          ./gplay auth
+
+      - name: Download the APK
+        run: |
+          cd gplay-downloader
+          # دانلود برای معماری arm64-v8a و ادغام split APK ها
+          ./gplay download "${{ github.event.inputs.package_name }}" -a arm64 -m -o ./output
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-apk
+          path: gplay-downloader/output/*.apk
