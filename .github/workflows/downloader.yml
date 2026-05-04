@@ -1,4 +1,4 @@
-name: Simple APK Downloader
+name: Download Original APK
 
 on:
   workflow_dispatch:
@@ -6,38 +6,68 @@ on:
       app_url:
         description: 'لینک گوگل پلی برنامه'
         required: true
+        default: 'https://play.google.com/store/apps/details?id=com.spotify.music'
 
 jobs:
   download:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download
+      - name: Download APK from APKPure
         run: |
+          # فقط wget و jq نیاز است (از قبل نصب هستند)
           URL="${{ github.event.inputs.app_url }}"
           PACKAGE=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
           
+          echo "📱 Package: $PACKAGE"
+          
+          # ساخت پوشه
           mkdir -p apks
           
-          # مستقیم از APKCombo
-          wget -q "https://apkcombo.com/checkin" --post-data="id=$PACKAGE" -O /tmp/info.json
-          DL_URL=$(jq -r '.url' /tmp/info.json)
+          # روش ۱: APKPure (قابل اعتماد و همیشه در دسترس)
+          echo "🔄 Trying APKPure..."
           
-          if [ "$DL_URL" != "null" ] && [ -n "$DL_URL" ]; then
-            wget -O "apks/$PACKAGE.apk" "$DL_URL"
-            echo "✅ Downloaded successfully"
+          # دریافت اطلاعات نسخه
+          API_INFO="https://apkpure.com/api/package/info?package=$PACKAGE"
+          VERSION=$(curl -s "$API_INFO" | jq -r '.data.version_code // empty')
+          
+          if [ -n "$VERSION" ]; then
+            echo "Found version: $VERSION"
+            
+            # ساخت لینک دانلود APKPure
+            DOWNLOAD_URL="https://d.apkpure.com/b/APK/${PACKAGE}?versionCode=${VERSION}"
+            
+            echo "Downloading..."
+            wget -q --show-progress \
+              -O "apks/${PACKAGE}-${VERSION}.apk" \
+              "$DOWNLOAD_URL"
+            
+            # بررسی سلامت فایل
+            if [ -f "apks/${PACKAGE}-${VERSION}.apk" ]; then
+              SIZE=$(stat -c%s "apks/${PACKAGE}-${VERSION}.apk")
+              echo "✅ Downloaded: ${SIZE} bytes ($(echo "scale=1; $SIZE/1024/1024" | bc)MB)"
+            fi
           else
-            echo "❌ Failed to get download URL"
-            cat /tmp/info.json
+            # روش ۲: APKCombo به عنوان fallback
+            echo "⚠️  APKPure failed, trying APKCombo..."
+            curl -s "https://apkcombo.com/checkin" \
+              --data "id=$PACKAGE" \
+              | jq -r '.url' | xargs wget -q -O "apks/${PACKAGE}.apk"
           fi
-
-      - name: Push
+          
+      - name: Show Results
         run: |
-          git config user.name "bot"
-          git config user.email "bot@github.com"
+          echo "📦 Downloaded files:"
+          ls -lh apks/ 2>/dev/null || echo "❌ No files downloaded"
+          
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
           git add apks/
-          git commit -m "Add APK" || true
+          git commit -m "📱 Add APK: ${{ steps.extract.outputs.package }}" || echo "No changes to commit"
           git push
