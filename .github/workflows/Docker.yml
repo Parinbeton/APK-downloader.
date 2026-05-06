@@ -1,42 +1,55 @@
-name: Pull Docker Image and Save as Artifact
+name: Pull Custom Docker Image and Save
 
 on:
-  workflow_dispatch:  # اجرای دستی از طریق GitHub UI
+  workflow_dispatch:  # اجرای دستی
     inputs:
-      image_tag:
-        description: 'Image tag (default: latest)'
-        required: false
-        default: 'latest'
+      docker_image:
+        description: 'Docker image name (e.g., kutovoys/xray-checker:latest)'
+        required: true
+        default: 'kutovoys/xray-checker:latest'
       output_filename:
-        description: 'Output filename (default: xray-checker.tar)'
+        description: 'Output filename (default: docker-image.tar)'
         required: false
-        default: 'xray-checker.tar'
+        default: 'docker-image.tar'
 
 jobs:
   pull-and-save:
-    runs-on: ubuntu-latest  # استفاده از Ubuntu (سبک‌تر و سریع‌تر)
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
+    - name: Create docker folder
+      run: |
+        mkdir -p docker-output
+        echo "Docker folder created at: $(pwd)/docker-output"
+      
     - name: Pull Docker image
       run: |
-        docker pull kutovoys/xray-checker:${{ github.event.inputs.image_tag }}
-        
-    - name: Save Docker image to tar file
+        echo "Pulling image: ${{ github.event.inputs.docker_image }}"
+        docker pull ${{ github.event.inputs.docker_image }}
+      
+    - name: Save Docker image to tar file inside docker folder
       run: |
-        docker save -o ${{ github.event.inputs.output_filename }} \
-          kutovoys/xray-checker:${{ github.event.inputs.image_tag }}
-        
-    - name: Compress tar file (optional, for faster download)
+        docker save -o docker-output/${{ github.event.inputs.output_filename }} \
+          ${{ github.event.inputs.docker_image }}
+        echo "Image saved to: docker-output/${{ github.event.inputs.output_filename }}"
+      
+    - name: Compress the tar file
       run: |
-        gzip ${{ github.event.inputs.output_filename }}
-        
-    - name: Upload artifact
+        gzip docker-output/${{ github.event.inputs.output_filename }}
+        echo "Compressed file: docker-output/${{ github.event.inputs.output_filename }}.gz"
+      
+    - name: List files in docker folder
+      run: |
+        echo "Files in docker-output folder:"
+        ls -lh docker-output/
+      
+    - name: Upload entire docker folder as artifact
       uses: actions/upload-artifact@v4
       with:
-        name: xray-checker-image
-        path: ${{ github.event.inputs.output_filename }}.gz
-        retention-days: 7  # فایل به مدت 7 روز در GitHub نگهداری می‌شود
+        name: docker-output
+        path: docker-output/
+        retention-days: 7
         if-no-files-found: error
