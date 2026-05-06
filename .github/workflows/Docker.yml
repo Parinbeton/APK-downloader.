@@ -1,4 +1,4 @@
-name: Pull Custom Docker Image and Save
+name: Pull Docker Image and Save to Repository
 
 on:
   workflow_dispatch:  # اجرای دستی
@@ -7,10 +7,13 @@ on:
         description: 'Docker image name (e.g., kutovoys/xray-checker:latest)'
         required: true
         default: 'kutovoys/xray-checker:latest'
-      output_filename:
-        description: 'Output filename (default: docker-image.tar)'
+      image_tag:
+        description: 'Tag for the saved file (optional)'
         required: false
-        default: 'docker-image.tar'
+        default: 'latest'
+
+permissions:
+  contents: write  # اجازه نوشتن در ریپازیتوری
 
 jobs:
   pull-and-save:
@@ -20,36 +23,56 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Create docker folder
+    - name: Create docker directory if not exists
       run: |
-        mkdir -p docker-output
-        echo "Docker folder created at: $(pwd)/docker-output"
+        mkdir -p docker
+        echo "✅ Docker directory is ready"
       
     - name: Pull Docker image
       run: |
-        echo "Pulling image: ${{ github.event.inputs.docker_image }}"
+        echo "📥 Pulling image: ${{ github.event.inputs.docker_image }}"
         docker pull ${{ github.event.inputs.docker_image }}
       
-    - name: Save Docker image to tar file inside docker folder
+    - name: Save Docker image to tar file
       run: |
-        docker save -o docker-output/${{ github.event.inputs.output_filename }} \
-          ${{ github.event.inputs.docker_image }}
-        echo "Image saved to: docker-output/${{ github.event.inputs.output_filename }}"
+        # استخراج نام ایمج بدون tag برای نام فایل
+        IMAGE_NAME=$(echo "${{ github.event.inputs.docker_image }}" | cut -d':' -f1 | sed 's/\//_/g')
+        TAG_NAME=$(echo "${{ github.event.inputs.docker_image }}" | cut -d':' -f2)
+        
+        if [ "$TAG_NAME" = "${{ github.event.inputs.docker_image }}" ]; then
+          TAG_NAME="${{ github.event.inputs.image_tag }}"
+        fi
+        
+        OUTPUT_FILE="docker/${IMAGE_NAME}_${TAG_NAME}.tar"
+        
+        echo "💾 Saving image to: $OUTPUT_FILE"
+        docker save -o "$OUTPUT_FILE" ${{ github.event.inputs.docker_image }}
+        
+        # فشرده‌سازی برای کاهش حجم
+        gzip "$OUTPUT_FILE"
+        echo "✅ Compressed: ${OUTPUT_FILE}.gz"
+        
+        # ذخیره نام فایل برای commit
+        echo "OUTPUT_FILE=${OUTPUT_FILE}.gz" >> $GITHUB_ENV
       
-    - name: Compress the tar file
+    - name: Commit and push the docker image file
       run: |
-        gzip docker-output/${{ github.event.inputs.output_filename }}
-        echo "Compressed file: docker-output/${{ github.event.inputs.output_filename }}.gz"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # اضافه کردن فایل به git
+        git add docker/*.tar.gz
+        
+        # اگر تغییری وجود داشت، commit کن
+        if git diff --staged --quiet; then
+          echo "📝 No changes to commit"
+        else
+          git commit -m "Add Docker image: ${{ github.event.inputs.docker_image }} [skip ci]"
+          git push
+          echo "✅ Docker image saved and pushed to repository"
+        fi
       
-    - name: List files in docker folder
+    - name: Show saved files
       run: |
-        echo "Files in docker-output folder:"
-        ls -lh docker-output/
-      
-    - name: Upload entire docker folder as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-output
-        path: docker-output/
-        retention-days: 7
-        if-no-files-found: error
+        echo "📁 Files saved in docker directory:"
+        ls -lh docker/
