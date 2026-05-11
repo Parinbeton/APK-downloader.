@@ -7,6 +7,7 @@
 | Property | Value |
 |----------|-------|
 | **Original File** | `StormDNS_Client_Windows_AMD64.zip` |
+| **Source URL** | https://github.com/nullroute1970/StormDNS/releases/download/v2026.05.08.160835-42554b3/StormDNS_Client_Windows_AMD64.zip |
 | **Size** | 6.35 MB |
 | **Status** | **Complete (100%)** |
 | **Password Protected** | **NO** |
@@ -14,7 +15,6 @@
 ---
 
 ## Download Link
-urls
 
 | File | Link |
 |------|------|
