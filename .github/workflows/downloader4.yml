@@ -250,6 +250,14 @@ jobs:
             return 1
           }
 
+          # Create associations array between URLs and filenames
+          declare -A URL_MAP
+          for URL in $URLS; do
+            FILENAME=$(basename "$URL" | sed 's/%20/ /g' | sed 's/%2F/-/g' | sed 's/[?#].*//')
+            FILENAME=$(echo "$FILENAME" | sed 's/[<>:"|?*]/_/g')
+            URL_MAP["$FILENAME"]="$URL"
+          done
+
           for URL in $URLS; do
             FILENAME=$(basename "$URL" | sed 's/%20/ /g' | sed 's/%2F/-/g' | sed 's/[?#].*//')
             FILENAME=$(echo "$FILENAME" | sed 's/[<>:"|?*]/_/g')
@@ -311,6 +319,17 @@ jobs:
                   done
                   ARCHIVE_SIZE_MB=$(echo "scale=2; $TOTAL_ARCHIVE_SIZE / 1024 / 1024" | bc)
 
+                  # Build URL list for the README
+                  URL_LIST_MD=""
+                  for f in "${VALID_FILES[@]}"; do
+                    fname=$(basename "$f")
+                    if [ -n "${URL_MAP[$fname]}" ]; then
+                      URL_LIST_MD="${URL_LIST_MD}| \`$fname\` | ${URL_MAP[$fname]} |"$'\n'
+                    else
+                      URL_LIST_MD="${URL_LIST_MD}| \`$fname\` | N/A |"$'\n'
+                    fi
+                  done
+
                   {
                     echo "# ${ARCHIVE_NAME} Archive"
                     echo ""
@@ -328,6 +347,14 @@ jobs:
                     else
                       echo "| **Password Protected** | **NO** |"
                     fi
+                    echo ""
+                    echo "---"
+                    echo ""
+                    echo "## Source URLs"
+                    echo ""
+                    echo "| File | URL |"
+                    echo "|------|-----|"
+                    printf '%s' "${URL_LIST_MD}"
                     echo ""
                     echo "---"
                     echo ""
@@ -386,6 +413,12 @@ jobs:
               mkdir -p "$BACKUP_DIR/$FOLDER_NAME"
 
               FOLDER_ENCODED=$(urlencode "${FOLDER_NAME}")
+
+              # Get the original URL for this file
+              FILE_URL="${URL_MAP[$BASENAME]}"
+              if [ -z "$FILE_URL" ]; then
+                FILE_URL="N/A"
+              fi
 
               if [ "$SIZE" -gt "$SPLIT_THRESHOLD_BYTES" ]; then
                 echo "$BASENAME is $(( SIZE / 1024 / 1024 ))MB - splitting into ${SPLIT_THRESHOLD_MB}MB parts"
@@ -449,6 +482,7 @@ jobs:
                   printf '%s\n' "| Property | Value |"
                   printf '%s\n' "|----------|-------|"
                   printf '%s\n' "| **Original File** | \`${BASENAME}\` |"
+                  printf '%s\n' "| **Source URL** | ${FILE_URL} |"
                   printf '%s\n' "| **Total Size** | **${PARTS_COUNT} parts** - **${TOTAL_SIZE_MB} MB** |"
                   printf '%s\n' "| **Status** | **Complete (100%)** |"
                   if [ -n "$ZIP_PASSWORD" ]; then
@@ -519,6 +553,7 @@ jobs:
                   printf '%s\n' "| Property | Value |"
                   printf '%s\n' "|----------|-------|"
                   printf '%s\n' "| **Original File** | \`${BASENAME}\` |"
+                  printf '%s\n' "| **Source URL** | ${FILE_URL} |"
                   printf '%s\n' "| **Size** | ${SIZE_MB} MB |"
                   printf '%s\n' "| **Status** | **Complete (100%)** |"
                   if [ -n "$ZIP_PASSWORD" ]; then
@@ -530,7 +565,6 @@ jobs:
                   printf '%s\n' "---"
                   printf '%s\n' ""
                   printf '%s\n' "## Download Link"
-                  printf '%s\n' "urls"
                   printf '%s\n' ""
                   printf '%s\n' "| File | Link |"
                   printf '%s\n' "|------|------|"
