@@ -7,8 +7,8 @@
 | Property | Value |
 |----------|-------|
 | **Original File** | `x-ui-windows-amd64.zip` |
-| **Source URL** | https://github.com/MHSanaei/3x-ui/releases/download/v3.0.0/x-ui-windows-amd64.zip |
-| **Total Size** | **2 parts** - **75.12 MB** |
+| **Source URL** | https://github.com/MHSanaei/3x-ui/releases/download/v3.0.1/x-ui-windows-amd64.zip |
+| **Total Size** | **2 parts** - **75.14 MB** |
 | **Status** | **Complete (100%)** |
 | **Password Protected** | **NO** |
 
