@@ -7,8 +7,8 @@
 | Property | Value |
 |----------|-------|
 | **Original File** | `mhrv-rs-windows-amd64.zip` |
-| **Source URL** | https://github.com/therealaleph/MasterHttpRelayVPN-RUST/releases/download/v1.9.21/mhrv-rs-windows-amd64.zip |
-| **Size** | 7.61 MB |
+| **Source URL** | https://github.com/therealaleph/MasterHttpRelayVPN-RUST/releases/download/v1.9.22/mhrv-rs-windows-amd64.zip |
+| **Size** | 7.47 MB |
 | **Status** | **Complete (100%)** |
 | **Password Protected** | **NO** |
 
