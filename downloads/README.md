@@ -4,6 +4,7 @@
 - [StormDNS_Client_Windows_AMD64](./StormDNS_Client_Windows_AMD64)
 - [mhrv-rs-windows-amd64](./mhrv-rs-windows-amd64)
 - [nginx-ui-windows-64.tar](./nginx-ui-windows-64.tar)
+- [v2rayN-windows-64-desktop](./v2rayN-windows-64-desktop)
 - [x-ui-windows-amd64](./x-ui-windows-amd64)
 - [zyrln-windows-amd64](./zyrln-windows-amd64)
 
